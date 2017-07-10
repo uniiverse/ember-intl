@@ -19,6 +19,7 @@ var LocaleWriter = require('./lib/broccoli-cldr');
 var relativeFormatPath = path.dirname(require.resolve('intl-relativeformat'));
 var messageFormatPath  = path.dirname(require.resolve('intl-messageformat'));
 var intlPath           = path.dirname(require.resolve('intl'));
+var utils = require('./lib/utils');
 
 module.exports = {
     name: 'ember-intl',
@@ -76,6 +77,7 @@ module.exports = {
 
     treeForPublic: function (inputTree) {
         var config = this.project.config(this.app.env);
+        var projectLocales = this.findLocales();
         var trees  = [inputTree];
 
         trees.push(new Funnel(intlPath, {
@@ -84,18 +86,53 @@ module.exports = {
             destDir: '/assets/intl/polyfill/'
         }));
 
-        // only use these when using Intl.js, should not be used
-        // with the native Intl API
-        trees.push(new Funnel(intlPath + '/locale-data/jsonp', {
-            srcDir:  '/',
-            includes:   ['*.js'],
-            destDir: '/assets/intl/polyfill/locales/'
-        }));
+        var localeFunnel = {
+          srcDir: 'locale-data/jsonp',
+          destDir: '/assets/intl/polyfill/locales/'
+        };
+
+        if (projectLocales.length) {
+          localeFunnel.include = projectLocales.map(function(locale) {
+            return new RegExp('^' + locale + '.js$', 'i');
+          });
+        }
+
+        trees.push(new Funnel(intlPath, localeFunnel));
 
         return mergeTrees(trees, { overwrite: true });
     },
 
     _transformLocale: function (result) {
         return 'export default ' + serialize(result)+ ';';
-    }
+    },
+
+    findLocales() {
+      var locales = [];
+      var config = this.project.config(this.app.env);
+      var inputPath = config.intl.inputPath;
+      var hasTranslationDir = fs.existsSync(path.join(this.app.project.root, inputPath));
+
+      if (hasTranslationDir) {
+        locales = locales.concat(walkSync(path.join(this.app.project.root, inputPath), ''));
+        locales = locales.map(function(filename) {
+          return path.basename(filename, path.extname(filename)).toLowerCase().replace(/_/g, '-');
+        });
+      }
+
+      if (config.locales) {
+        locales = locales.concat(config.locales);
+      }
+
+      locales = locales.concat(locales.filter(function(locale) {
+        if (utils.isSupportedLocale(locale)) {
+          return true;
+        }
+
+        console.log(`'${locale}' is not a valid locale name`);
+
+        return false;
+      }, this));
+
+      return utils.unique(locales);
+    },
 };
